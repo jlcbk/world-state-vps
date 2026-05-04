@@ -128,3 +128,46 @@ Backup to Mac mini over Tailscale or LAN:
 ```bash
 rsync -avz /var/lib/world-state/ macmini:/Users/cui/world-state-vps/
 ```
+
+## Optional Cold Archive With Rclone
+
+Cold archive support is optional and disabled by default. Use it only after you have a WebDAV, S3, R2, B2, or other rclone-compatible storage target.
+
+Install archive support:
+
+```bash
+sudo bash /opt/world-state/app/scripts/setup_archive_timer.sh
+```
+
+Configure your remote:
+
+```bash
+rclone config
+sudo nano /etc/world-state/archive.env
+```
+
+Example `/etc/world-state/archive.env`:
+
+```bash
+RCLONE_REMOTE=worlddav
+REMOTE_PATH=world-state-archive
+DATA_DIR=/var/lib/world-state
+KEEP_LOCAL_ARCHIVES_DAYS=7
+```
+
+Test once:
+
+```bash
+sudo systemctl start world-state-archive.service
+journalctl -u world-state-archive.service -n 100 --no-pager
+```
+
+Enable daily archive:
+
+```bash
+sudo systemctl enable --now world-state-archive.timer
+```
+
+This archive job exports the previous UTC day's SQLite metadata and state snapshots, packages them with JSONL outputs, compresses the bundle with zstd, uploads it through rclone, then keeps only a short local archive cache.
+
+Do not put `world_state.db` directly on WebDAV or any unreliable network mount. The collector writes to local disk first; archive upload is asynchronous.

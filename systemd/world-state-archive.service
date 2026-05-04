@@ -1,0 +1,14 @@
+[Unit]
+Description=World State Cold Archive Upload
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/world-state/app/scripts/archive_to_rclone.sh
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+MemoryMax=500M
+TimeoutStartSec=900
+
