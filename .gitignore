@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.db
+*.sqlite
+*.sqlite3
+*.jsonl
+*.log
+*.zst
+*.tar
+*.tar.gz
+*.tar.zst
+world_state.json
+data/
+archive/

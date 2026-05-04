@@ -1,0 +1,51 @@
+storage:
+  data_dir: /var/lib/world-state
+  db_path: /var/lib/world-state/world_state.db
+  hot_retention_days: 14
+  snapshot_retention_days: 30
+
+collector:
+  user_agent: "world-state-vps/0.1 contact=you@example.com"
+  request_timeout_seconds: 20
+  max_articles_per_query: 50
+  gdelt_timespan: "1h"
+
+detector:
+  recent_window_minutes: 60
+  baseline_window_hours: 72
+  min_recent_count: 8
+  surge_ratio: 3.0
+  high_priority_keywords:
+    - "breaking"
+    - "emergency"
+    - "sanctions"
+    - "rate cut"
+    - "rate hike"
+    - "missile"
+    - "resigns"
+    - "bankruptcy"
+    - "investigation"
+
+topics:
+  - name: fed_policy
+    gdelt_query: '"Federal Reserve" OR FOMC OR "interest rates" OR inflation'
+  - name: us_macro
+    gdelt_query: '"nonfarm payrolls" OR CPI OR PCE OR unemployment OR "Treasury yields"'
+  - name: polymarket
+    gdelt_query: 'polymarket OR "prediction market" OR "election odds"'
+  - name: geopolitics
+    gdelt_query: 'Ukraine Russia OR Taiwan China OR "Middle East" oil'
+  - name: ai_stocks
+    gdelt_query: 'Nvidia OR OpenAI OR "AI chips" OR "semiconductor export controls"'
+
+rss_feeds:
+  - name: sec_press
+    topic: us_equities
+    url: https://www.sec.gov/news/pressreleases.rss
+  - name: fed_press
+    topic: fed_policy
+    url: https://www.federalreserve.gov/feeds/press_all.xml
+  - name: treasury_press
+    topic: us_policy
+    url: https://home.treasury.gov/news/press-releases/rss
+

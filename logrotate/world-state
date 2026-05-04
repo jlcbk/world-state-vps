@@ -1,0 +1,9 @@
+/var/lib/world-state/*.jsonl {
+  daily
+  rotate 14
+  compress
+  missingok
+  notifempty
+  copytruncate
+}
+

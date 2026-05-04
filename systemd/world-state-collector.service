@@ -1,0 +1,14 @@
+[Unit]
+Description=World State Collector
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/world-state/venv/bin/python /opt/world-state/app/world_state_collector.py --config /etc/world-state/config.yaml
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+MemoryMax=700M
+TimeoutStartSec=180
+
