@@ -1,14 +1,14 @@
 storage:
   data_dir: /var/lib/world-state
   db_path: /var/lib/world-state/world_state.db
-  hot_retention_days: 14
-  snapshot_retention_days: 30
+  hot_retention_days: 3
+  snapshot_retention_days: 7
 
 collector:
   user_agent: "world-state-vps/0.1 contact=you@example.com"
   request_timeout_seconds: 20
-  max_articles_per_query: 50
-  gdelt_timespan: "1h"
+  max_articles_per_query: 25
+  gdelt_timespan: "30min"
 
 detector:
   recent_window_minutes: 60
@@ -48,4 +48,3 @@ rss_feeds:
   - name: treasury_press
     topic: us_policy
     url: https://home.treasury.gov/news/press-releases/rss
-

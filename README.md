@@ -2,7 +2,7 @@
 
 Lightweight Ubuntu 24 collector node for building a rolling "world state" feed.
 
-Designed for a small VPS: 2 vCPU, 2GB RAM, about 30GB free disk.
+Designed for a small VPS: 2 vCPU, 2GB RAM, and 15-30GB free disk.
 
 ## What Runs On The VPS
 
@@ -84,18 +84,30 @@ Outputs:
 
 ## Disk Budget
 
-Recommended for 30GB free disk:
+Default config is conservative enough for a VPS with about 15GB free disk:
 
-- SQLite metadata: target under 5GB.
-- JSONL hot output: target under 2GB.
+- SQLite metadata: target under 1-3GB.
+- JSONL hot output: target under 500MB-1GB.
 - No full-page snapshots on VPS.
 - Sync older data to Mac mini, then delete or compact.
 
 Default retention:
 
-- Raw article metadata: 14 days
-- State snapshots: 30 days
+- Raw article metadata: 3 days
+- State snapshots: 7 days
 - Alerts/events JSONL: use logrotate, 14 rotated files
+
+For a larger VPS, you can raise:
+
+```yaml
+storage:
+  hot_retention_days: 14
+  snapshot_retention_days: 30
+
+collector:
+  max_articles_per_query: 50
+  gdelt_timespan: "1h"
+```
 
 ## Manual Commands
 
