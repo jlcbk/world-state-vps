@@ -16,6 +16,23 @@ Heavy analysis, BettaFish, MiroFish, backtests, graph building, and long-term ar
 
 ## Quick Install On Ubuntu 24
 
+### One-command deploy after logging into the VPS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jlcbk/world-state-vps/main/scripts/deploy_on_vps_ubuntu24.sh -o /tmp/deploy_world_state.sh
+bash /tmp/deploy_world_state.sh
+```
+
+For a private repository, the VPS must be able to access GitHub first. Use a GitHub deploy key, `gh auth login`, or clone/upload the repository manually.
+
+You can override the repository URL:
+
+```bash
+REPO_URL=git@github.com:jlcbk/world-state-vps.git bash /tmp/deploy_world_state.sh
+```
+
+### Manual install from a local checkout
+
 ```bash
 sudo apt update
 sudo apt install -y git
@@ -99,4 +116,3 @@ Backup to Mac mini over Tailscale or LAN:
 ```bash
 rsync -avz /var/lib/world-state/ macmini:/Users/cui/world-state-vps/
 ```
-
