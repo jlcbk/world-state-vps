@@ -1,5 +1,5 @@
 [Unit]
-Description=World State Collector - Treasury HTML full text
+Description=World State Collector - Official HTML full text
 Wants=network-online.target
 After=network-online.target
 
@@ -10,4 +10,4 @@ Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 MemoryMax=700M
-TimeoutStartSec=240
+TimeoutStartSec=900
