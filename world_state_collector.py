@@ -148,7 +148,9 @@ def fetch_rss(session: requests.Session, config: Dict[str, Any], feed: Dict[str,
     if not items:
         items = root.findall("{http://www.w3.org/2005/Atom}entry")
     out = []
-    for item in items[:100]:
+    max_items = int(feed.get("max_items", 100))
+    detail_delay = float(feed.get("detail_delay_seconds", 0.5))
+    for item in items[:max_items]:
         title = text_of(item, "title")
         link = text_of(item, "link")
         if not link:
@@ -156,6 +158,14 @@ def fetch_rss(session: requests.Session, config: Dict[str, Any], feed: Dict[str,
             link = atom_link.attrib.get("href", "") if atom_link is not None else ""
         published = text_of(item, "pubDate") or text_of(item, "published") or text_of(item, "updated")
         desc = text_of(item, "description") or text_of(item, "summary")
+        detail = {"full_text": "", "description": "", "body_html": ""}
+        if feed.get("fetch_full_text") and link:
+            try:
+                detail = fetch_article_detail(session, config, link, feed.get("parser", feed.get("name", "generic")))
+            except Exception as exc:
+                print(f"rss detail fetch failed feed={feed.get('name')} url={link}: {exc}", file=sys.stderr)
+            time.sleep(detail_delay)
+        snippet_source = detail.get("description") or detail.get("full_text") or desc or title
         out.append(
             {
                 "source": f"rss:{feed['name']}",
@@ -166,8 +176,13 @@ def fetch_rss(session: requests.Session, config: Dict[str, Any], feed: Dict[str,
                 "domain": urlparse(link).netloc,
                 "language": None,
                 "published_at": parse_dt(published),
-                "snippet": clean_text(desc)[:500],
-                "raw": {"feed": feed["name"]},
+                "snippet": clean_text(snippet_source)[:500],
+                "raw": {
+                    "feed": feed["name"],
+                    "description": desc,
+                    "full_text": detail.get("full_text", ""),
+                    "body_html": detail.get("body_html", ""),
+                },
             }
         )
     return out
@@ -199,10 +214,76 @@ def extract_div_by_class(html: str, class_substring: str) -> str:
         if full_tag.startswith("</"):
             depth -= 1
             if depth == 0:
-                return html[pos:pos + tag.start()]
+                return html[m.start():pos + tag.end()]
         else:
             depth += 1
-    return html[pos:]
+    return html[m.start():]
+
+
+def extract_div_by_id(html: str, id_value: str) -> str:
+    m = re.search(r'<div\b[^>]*id=["\']' + re.escape(id_value) + r'["\'][^>]*>', html, re.I)
+    if not m:
+        return ""
+    pos = m.end()
+    depth = 1
+    for tag in re.finditer(r"(?is)</?div\b[^>]*>", html[pos:]):
+        full_tag = tag.group(0)
+        if full_tag.startswith("</"):
+            depth -= 1
+            if depth == 0:
+                return html[m.start():pos + tag.end()]
+        else:
+            depth += 1
+    return html[m.start():]
+
+
+def meta_content(html: str, name: str) -> str:
+    patterns = [
+        r'<meta\s+property=["\']' + re.escape(name) + r'["\']\s+content=["\']([^"\']*)["\']',
+        r'<meta\s+name=["\']' + re.escape(name) + r'["\']\s+content=["\']([^"\']*)["\']',
+        r'<meta\s+content=["\']([^"\']*)["\']\s+(?:property|name)=["\']' + re.escape(name) + r'["\']',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, html, re.I)
+        if m:
+            return clean_text(html_lib.unescape(m.group(1)))
+    return ""
+
+
+def extract_article_body(html: str, parser: str = "generic") -> Dict[str, str]:
+    candidates = []
+    if parser in {"sec_press", "sec"}:
+        candidates.append(extract_div_by_class(html, "field--name-body"))
+    elif parser in {"fed_press", "fed"}:
+        article = extract_div_by_id(html, "article")
+        body = ""
+        matches = re.findall(r'(?is)<div\b[^>]*class="[^"]*col-xs-12\s+col-sm-8\s+col-md-8[^"]*"[^>]*>(.*?)</div>', article)
+        if matches:
+            body = matches[-1]
+        candidates.extend([body, article])
+    elif parser in {"whitehouse_briefings", "whitehouse"}:
+        candidates.append(extract_div_by_class(html, "entry-content"))
+    elif parser in {"treasury_press_releases", "treasury"}:
+        candidates.append(extract_div_by_class(html, "field--name-field-news-body"))
+    elif parser in {"ofac_recent_actions", "ofac"}:
+        candidates.append(extract_div_by_class(html, "field--name-body"))
+    candidates.extend([
+        extract_div_by_class(html, "field--name-body"),
+        extract_div_by_class(html, "entry-content"),
+        extract_div_by_id(html, "article"),
+        extract_div_by_id(html, "main-content"),
+    ])
+    body_html = next((c for c in candidates if html_to_text(c)), "")
+    full_text = html_to_text(body_html)
+    description = meta_content(html, "og:description") or meta_content(html, "description")
+    return {"full_text": full_text, "description": description, "body_html": body_html[:200000]}
+
+
+def fetch_article_detail(session: requests.Session, config: Dict[str, Any], url: str, parser: str = "generic") -> Dict[str, str]:
+    timeout = int(config.get("collector", {}).get("request_timeout_seconds", 20))
+    r = session.get(url, timeout=timeout)
+    r.raise_for_status()
+    return extract_article_body(r.text, parser)
 
 
 def classify_treasury_title(title: str) -> str:
@@ -225,16 +306,7 @@ def classify_treasury_title(title: str) -> str:
 
 
 def fetch_treasury_article_body(session: requests.Session, config: Dict[str, Any], url: str) -> Dict[str, str]:
-    timeout = int(config.get("collector", {}).get("request_timeout_seconds", 20))
-    r = session.get(url, timeout=timeout)
-    r.raise_for_status()
-    body_html = extract_div_by_class(r.text, "field--name-field-news-body")
-    full_text = html_to_text(body_html)
-    description = ""
-    m = re.search(r'<meta\s+property="og:description"\s+content="([^"]*)"', r.text, re.I)
-    if m:
-        description = clean_text(html_lib.unescape(m.group(1)))
-    return {"full_text": full_text, "description": description, "body_html": body_html[:200000]}
+    return fetch_article_detail(session, config, url, "treasury_press_releases")
 
 
 def fetch_treasury_press_releases(session: requests.Session, config: Dict[str, Any], feed: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -299,10 +371,110 @@ def fetch_treasury_press_releases(session: requests.Session, config: Dict[str, A
     return out
 
 
+def parse_ofac_recent_actions(page_html: str, base_url: str, max_items: int = 10) -> List[Dict[str, str]]:
+    pattern = re.compile(
+        r'<div[^>]*class="[^"]*views-row[^"]*"[^>]*>.*?'
+        r'<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?'
+        r'([A-Z][a-z]+\s+\d{1,2},\s+\d{4})\s*-\s*<a[^>]*>(.*?)</a>',
+        re.S | re.I,
+    )
+    rows = []
+    seen = set()
+    for href, title_html, date_text, category_html in pattern.findall(page_html):
+        link = urljoin(base_url, html_lib.unescape(href))
+        if link in seen:
+            continue
+        seen.add(link)
+        rows.append(
+            {
+                "title": html_to_text(title_html),
+                "url": link,
+                "published_at": parse_dt(date_text) or "",
+                "category": html_to_text(category_html),
+            }
+        )
+        if len(rows) >= max_items:
+            break
+    return rows
+
+
+def parse_whitehouse_briefings(page_html: str, base_url: str, max_items: int = 10) -> List[Dict[str, str]]:
+    pattern = re.compile(r'<a[^>]+href="([^"]*/briefings-statements/\d{4}/\d{2}/[^"]+/)"[^>]*>(.*?)</a>', re.S | re.I)
+    rows = []
+    seen = set()
+    for href, title_html in pattern.findall(page_html):
+        title = html_to_text(title_html)
+        link = urljoin(base_url, html_lib.unescape(href))
+        if not title or link in seen:
+            continue
+        seen.add(link)
+        after = page_html[page_html.find(href):page_html.find(href) + 2500]
+        m = re.search(r'<time[^>]*datetime="([^"]+)"', after, re.I)
+        rows.append({"title": title, "url": link, "published_at": parse_dt(m.group(1)) if m else "", "category": "statements"})
+        if len(rows) >= max_items:
+            break
+    return rows
+
+
+def fetch_low_volume_html_articles(session: requests.Session, config: Dict[str, Any], feed: Dict[str, Any], rows: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    detail_delay = float(feed.get("detail_delay_seconds", 1.0))
+    parser = feed.get("parser", "generic")
+    for row in rows:
+        detail = {"full_text": "", "description": "", "body_html": ""}
+        try:
+            detail = fetch_article_detail(session, config, row["url"], parser)
+        except Exception as exc:
+            print(f"html detail fetch failed feed={feed.get('name')} url={row.get('url')}: {exc}", file=sys.stderr)
+        snippet_source = detail.get("description") or detail.get("full_text") or row.get("title", "")
+        out.append(
+            {
+                "source": f"html:{feed['name']}",
+                "topic": feed.get("topic", feed["name"]),
+                "query": feed["url"],
+                "title": row.get("title", ""),
+                "url": row.get("url", ""),
+                "domain": urlparse(row.get("url", "")).netloc,
+                "language": "en",
+                "published_at": row.get("published_at") or None,
+                "snippet": clean_text(snippet_source)[:500],
+                "raw": {
+                    "feed": feed["name"],
+                    "category": row.get("category", ""),
+                    "description": detail.get("description", ""),
+                    "full_text": detail.get("full_text", ""),
+                    "body_html": detail.get("body_html", ""),
+                },
+            }
+        )
+        time.sleep(detail_delay)
+    return out
+
+
+def fetch_ofac_recent_actions(session: requests.Session, config: Dict[str, Any], feed: Dict[str, Any]) -> List[Dict[str, Any]]:
+    timeout = int(config.get("collector", {}).get("request_timeout_seconds", 20))
+    r = session.get(feed["url"], timeout=timeout)
+    r.raise_for_status()
+    rows = parse_ofac_recent_actions(r.text, feed["url"], int(feed.get("max_items", 10)))
+    return fetch_low_volume_html_articles(session, config, feed, rows)
+
+
+def fetch_whitehouse_briefings(session: requests.Session, config: Dict[str, Any], feed: Dict[str, Any]) -> List[Dict[str, Any]]:
+    timeout = int(config.get("collector", {}).get("request_timeout_seconds", 20))
+    r = session.get(feed["url"], timeout=timeout)
+    r.raise_for_status()
+    rows = parse_whitehouse_briefings(r.text, feed["url"], int(feed.get("max_items", 10)))
+    return fetch_low_volume_html_articles(session, config, feed, rows)
+
+
 def fetch_html_feed(session: requests.Session, config: Dict[str, Any], feed: Dict[str, Any]) -> List[Dict[str, Any]]:
     parser = feed.get("parser")
     if parser == "treasury_press_releases":
         return fetch_treasury_press_releases(session, config, feed)
+    if parser == "ofac_recent_actions":
+        return fetch_ofac_recent_actions(session, config, feed)
+    if parser == "whitehouse_briefings":
+        return fetch_whitehouse_briefings(session, config, feed)
     raise ValueError(f"unknown html feed parser: {parser}")
 
 

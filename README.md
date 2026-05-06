@@ -7,9 +7,9 @@ Designed for a small VPS: 2 vCPU, 2GB RAM, and 15-30GB free disk.
 ## What Runs On The VPS
 
 - Pulls GDELT DOC API queries.
-- Pulls selected RSS feeds.
-- Pulls Treasury Press Releases from HTML and stores full article text.
-- Stores compact metadata plus selected high-value full text in SQLite.
+- Pulls selected low-volume official RSS feeds and stores full article text for configured feeds.
+- Pulls Treasury Press Releases, OFAC Recent Actions, and White House Briefings/Statements from HTML and stores full article text.
+- Stores compact metadata plus selected high-value official-source full text in SQLite.
 - Writes `world_state.json`, `alerts.jsonl`, and `events.jsonl`.
 - Keeps only recent hot data on VPS.
 
@@ -74,7 +74,9 @@ Default collection schedule:
 
 ```text
 RSS official feeds:       every 15 minutes, at :00/:15/:30/:45
-Treasury HTML full text:  every 30 minutes, at :05/:35
+  - SEC/Fed are configured as low-volume official feeds with latest 10 details fetched as full text.
+Treasury/OFAC/White House HTML full text:
+                          every 30 minutes, at :05/:35
 GDELT DOC API:            every 60 minutes, at :10
 ```
 

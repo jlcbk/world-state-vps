@@ -43,14 +43,34 @@ rss_feeds:
   - name: sec_press
     topic: us_equities
     url: https://www.sec.gov/news/pressreleases.rss
+    parser: sec_press
+    max_items: 10
+    fetch_full_text: true
+    detail_delay_seconds: 1
   - name: fed_press
     topic: fed_policy
     url: https://www.federalreserve.gov/feeds/press_all.xml
+    parser: fed_press
+    max_items: 10
+    fetch_full_text: true
+    detail_delay_seconds: 1
 
 html_feeds:
   - name: treasury_press
     topic: us_policy
     url: https://home.treasury.gov/news/press-releases
     parser: treasury_press_releases
+    max_items: 10
+    detail_delay_seconds: 1
+  - name: ofac_recent_actions
+    topic: sanctions
+    url: https://ofac.treasury.gov/recent-actions
+    parser: ofac_recent_actions
+    max_items: 10
+    detail_delay_seconds: 1
+  - name: whitehouse_briefings
+    topic: us_policy
+    url: https://www.whitehouse.gov/briefings-statements/
+    parser: whitehouse_briefings
     max_items: 10
     detail_delay_seconds: 1
