@@ -1,0 +1,11 @@
+[Unit]
+Description=Run World State RSS collector every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00
+AccuracySec=45s
+Persistent=true
+Unit=world-state-rss.service
+
+[Install]
+WantedBy=timers.target

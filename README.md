@@ -8,7 +8,8 @@ Designed for a small VPS: 2 vCPU, 2GB RAM, and 15-30GB free disk.
 
 - Pulls GDELT DOC API queries.
 - Pulls selected RSS feeds.
-- Stores compact metadata in SQLite.
+- Pulls Treasury Press Releases from HTML and stores full article text.
+- Stores compact metadata plus selected high-value full text in SQLite.
 - Writes `world_state.json`, `alerts.jsonl`, and `events.jsonl`.
 - Keeps only recent hot data on VPS.
 
@@ -55,22 +56,37 @@ Then edit:
 sudo nano /etc/world-state/config.yaml
 ```
 
-Run once:
+Run one source once:
 
 ```bash
-sudo systemctl start world-state-collector.service
+sudo systemctl start world-state-rss.service
+sudo systemctl start world-state-treasury.service
+sudo systemctl start world-state-gdelt.service
 ```
 
-Enable the timer:
+Enable split source timers:
 
 ```bash
-sudo systemctl enable --now world-state-collector.timer
+sudo systemctl enable --now world-state-rss.timer world-state-treasury.timer world-state-gdelt.timer
 ```
+
+Default collection schedule:
+
+```text
+RSS official feeds:       every 15 minutes, at :00/:15/:30/:45
+Treasury HTML full text:  every 30 minutes, at :05/:35
+GDELT DOC API:            every 60 minutes, at :10
+```
+
+The split services use `/usr/bin/flock /run/world-state-collector.lock` so only one collector writes SQLite/state files at a time. The legacy all-in-one `world-state-collector.timer` is installed for compatibility but disabled by bootstrap.
 
 Check logs:
 
 ```bash
-journalctl -u world-state-collector.service -n 100 --no-pager
+journalctl -u world-state-rss.service -n 100 --no-pager
+journalctl -u world-state-treasury.service -n 100 --no-pager
+journalctl -u world-state-gdelt.service -n 100 --no-pager
+systemctl list-timers | grep world-state
 ```
 
 Outputs:
@@ -105,16 +121,25 @@ storage:
   snapshot_retention_days: 30
 
 collector:
-  max_articles_per_query: 50
-  gdelt_timespan: "1h"
+  max_articles_per_query: 25
+  gdelt_timespan: "2h"
+  gdelt_request_delay_seconds: 15
 ```
 
 ## Manual Commands
 
-Run collector once:
+Run all sources once:
 
 ```bash
 /opt/world-state/venv/bin/python /opt/world-state/app/world_state_collector.py --config /etc/world-state/config.yaml
+```
+
+Run one source group:
+
+```bash
+/opt/world-state/venv/bin/python /opt/world-state/app/world_state_collector.py --config /etc/world-state/config.yaml --sources rss
+/opt/world-state/venv/bin/python /opt/world-state/app/world_state_collector.py --config /etc/world-state/config.yaml --sources html
+/opt/world-state/venv/bin/python /opt/world-state/app/world_state_collector.py --config /etc/world-state/config.yaml --sources gdelt
 ```
 
 Show latest state:

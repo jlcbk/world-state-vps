@@ -2,7 +2,9 @@
 import argparse
 import email.utils
 import hashlib
+import html as html_lib
 import json
+import re
 import sqlite3
 import sys
 import time
@@ -11,7 +13,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 import yaml
@@ -178,6 +180,132 @@ def text_of(node: ET.Element, name: str) -> str:
     return clean_text(found.text if found is not None and found.text else "")
 
 
+def html_to_text(fragment: str) -> str:
+    fragment = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", fragment)
+    fragment = re.sub(r"(?i)<br\s*/?>", "\n", fragment)
+    fragment = re.sub(r"(?i)</(p|div|li|h1|h2|h3|h4|blockquote|tr)>", "\n", fragment)
+    fragment = re.sub(r"(?is)<[^>]+>", " ", fragment)
+    return clean_text(html_lib.unescape(fragment))
+
+
+def extract_div_by_class(html: str, class_substring: str) -> str:
+    m = re.search(r'<div\b[^>]*class="[^"]*' + re.escape(class_substring) + r'[^"]*"[^>]*>', html, re.I)
+    if not m:
+        return ""
+    pos = m.end()
+    depth = 1
+    for tag in re.finditer(r"(?is)</?div\b[^>]*>", html[pos:]):
+        full_tag = tag.group(0)
+        if full_tag.startswith("</"):
+            depth -= 1
+            if depth == 0:
+                return html[pos:pos + tag.start()]
+        else:
+            depth += 1
+    return html[pos:]
+
+
+def classify_treasury_title(title: str) -> str:
+    tl = title.lower()
+    if "sanction" in tl or "ofac" in tl:
+        return "sanctions"
+    if any(x in tl for x in ["borrowing", "refunding", "treasury securities", "tbac"]):
+        return "debt_issuance"
+    if "fincen" in tl:
+        return "fincen"
+    if "cfius" in tl:
+        return "cfius"
+    if any(x in tl for x in ["iran", "russia", "china", "congo", "ukraine"]):
+        return "geo_finance"
+    if "appointment" in tl or "nomination" in tl:
+        return "appointments"
+    if "remarks" in tl or "statement" in tl:
+        return "remarks"
+    return "treasury_policy"
+
+
+def fetch_treasury_article_body(session: requests.Session, config: Dict[str, Any], url: str) -> Dict[str, str]:
+    timeout = int(config.get("collector", {}).get("request_timeout_seconds", 20))
+    r = session.get(url, timeout=timeout)
+    r.raise_for_status()
+    body_html = extract_div_by_class(r.text, "field--name-field-news-body")
+    full_text = html_to_text(body_html)
+    description = ""
+    m = re.search(r'<meta\s+property="og:description"\s+content="([^"]*)"', r.text, re.I)
+    if m:
+        description = clean_text(html_lib.unescape(m.group(1)))
+    return {"full_text": full_text, "description": description, "body_html": body_html[:200000]}
+
+
+def fetch_treasury_press_releases(session: requests.Session, config: Dict[str, Any], feed: Dict[str, Any]) -> List[Dict[str, Any]]:
+    timeout = int(config.get("collector", {}).get("request_timeout_seconds", 20))
+    r = session.get(feed["url"], timeout=timeout)
+    r.raise_for_status()
+    page_html = r.text
+    start = page_html.find('<div class="content--2col__body">')
+    if start == -1:
+        start = page_html.find('id="main-content"')
+    end = page_html.find('<nav class="pager"', start)
+    if end == -1:
+        end = page_html.find('</section>', start)
+    main = page_html[start:end if end != -1 else len(page_html)]
+    pattern = re.compile(
+        r'<time[^>]*datetime="([^"]+)"[^>]*>.*?</time>.*?'
+        r'<h3[^>]*class="[^"]*featured-stories__headline[^"]*"[^>]*>\s*'
+        r'<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+        re.S | re.I,
+    )
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    max_items = int(feed.get("max_items", 10))
+    detail_delay = float(feed.get("detail_delay_seconds", 1.0))
+    for published, href, title_html in pattern.findall(main):
+        title = html_to_text(title_html)
+        link = urljoin(feed["url"], html_lib.unescape(href))
+        if link in seen:
+            continue
+        seen.add(link)
+        category = classify_treasury_title(title)
+        detail = {"full_text": "", "description": "", "body_html": ""}
+        try:
+            detail = fetch_treasury_article_body(session, config, link)
+        except Exception as exc:
+            print(f"treasury detail fetch failed url={link}: {exc}", file=sys.stderr)
+        snippet_source = detail.get("description") or detail.get("full_text") or title
+        out.append(
+            {
+                "source": f"html:{feed['name']}",
+                "topic": feed.get("topic", feed["name"]),
+                "query": feed["url"],
+                "title": title,
+                "url": link,
+                "domain": urlparse(link).netloc,
+                "language": "en",
+                "published_at": parse_dt(published),
+                "snippet": clean_text(snippet_source)[:500],
+                "raw": {
+                    "feed": feed["name"],
+                    "category": category,
+                    "published_at_raw": published,
+                    "description": detail.get("description", ""),
+                    "full_text": detail.get("full_text", ""),
+                    "body_html": detail.get("body_html", ""),
+                },
+            }
+        )
+        if len(out) >= max_items:
+            break
+        time.sleep(detail_delay)
+    return out
+
+
+def fetch_html_feed(session: requests.Session, config: Dict[str, Any], feed: Dict[str, Any]) -> List[Dict[str, Any]]:
+    parser = feed.get("parser")
+    if parser == "treasury_press_releases":
+        return fetch_treasury_press_releases(session, config, feed)
+    raise ValueError(f"unknown html feed parser: {parser}")
+
+
 def clean_text(text: str) -> str:
     return " ".join((text or "").replace("\n", " ").split())
 
@@ -228,7 +356,8 @@ def build_state(db_path: str, config: Dict[str, Any]) -> Dict[str, Any]:
     since_1h = iso(now - timedelta(hours=1))
     topics = [t["name"] for t in config.get("topics", [])]
     rss_topics = [f.get("topic", f["name"]) for f in config.get("rss_feeds", [])]
-    all_topics = sorted(set(topics + rss_topics))
+    html_topics = [f.get("topic", f["name"]) for f in config.get("html_feeds", [])]
+    all_topics = sorted(set(topics + rss_topics + html_topics))
 
     state = {
         "as_of": iso(now),
@@ -399,7 +528,15 @@ def cleanup(db_path: str, config: Dict[str, Any]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument(
+        "--sources",
+        default="all",
+        help="Comma-separated source groups to collect: gdelt,rss,html,all",
+    )
     args = parser.parse_args()
+    requested_sources = {x.strip().lower() for x in args.sources.split(",") if x.strip()}
+    if not requested_sources or "all" in requested_sources:
+        requested_sources = {"gdelt", "rss", "html"}
 
     config = load_config(args.config)
     data_dir = Path(config.get("storage", {}).get("data_dir", "/var/lib/world-state"))
@@ -409,19 +546,29 @@ def main() -> int:
     session = request_session(config)
     articles: List[Dict[str, Any]] = []
 
-    for topic in config.get("topics", []):
-        try:
-            articles.extend(fetch_gdelt(session, config, topic))
-        except Exception as exc:
-            print(f"gdelt fetch failed topic={topic.get('name')}: {exc}", file=sys.stderr)
-        time.sleep(0.5)
+    if "gdelt" in requested_sources:
+        for topic in config.get("topics", []):
+            try:
+                articles.extend(fetch_gdelt(session, config, topic))
+            except Exception as exc:
+                print(f"gdelt fetch failed topic={topic.get('name')}: {exc}", file=sys.stderr)
+            time.sleep(float(config.get("collector", {}).get("gdelt_request_delay_seconds", 6)))
 
-    for feed in config.get("rss_feeds", []):
-        try:
-            articles.extend(fetch_rss(session, config, feed))
-        except Exception as exc:
-            print(f"rss fetch failed feed={feed.get('name')}: {exc}", file=sys.stderr)
-        time.sleep(0.2)
+    if "rss" in requested_sources:
+        for feed in config.get("rss_feeds", []):
+            try:
+                articles.extend(fetch_rss(session, config, feed))
+            except Exception as exc:
+                print(f"rss fetch failed feed={feed.get('name')}: {exc}", file=sys.stderr)
+            time.sleep(0.2)
+
+    if "html" in requested_sources:
+        for feed in config.get("html_feeds", []):
+            try:
+                articles.extend(fetch_html_feed(session, config, feed))
+            except Exception as exc:
+                print(f"html fetch failed feed={feed.get('name')}: {exc}", file=sys.stderr)
+            time.sleep(0.2)
 
     inserted = store_articles(db_path, articles)
     state = build_state(db_path, config)
@@ -433,7 +580,7 @@ def main() -> int:
     append_jsonl(data_dir / "alerts.jsonl", alerts)
     cleanup(db_path, config)
 
-    print(json.dumps({"inserted": inserted, "fetched": len(articles), "alerts": len(alerts)}, ensure_ascii=False))
+    print(json.dumps({"sources": sorted(requested_sources), "inserted": inserted, "fetched": len(articles), "alerts": len(alerts)}, ensure_ascii=False))
     return 0
 
 

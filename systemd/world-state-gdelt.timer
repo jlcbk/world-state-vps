@@ -1,0 +1,11 @@
+[Unit]
+Description=Run World State GDELT collector every 60 minutes
+
+[Timer]
+OnCalendar=*-*-* *:10:00
+AccuracySec=90s
+Persistent=true
+Unit=world-state-gdelt.service
+
+[Install]
+WantedBy=timers.target

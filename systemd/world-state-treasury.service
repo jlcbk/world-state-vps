@@ -1,0 +1,13 @@
+[Unit]
+Description=World State Collector - Treasury HTML full text
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock /run/world-state-collector.lock /opt/world-state/venv/bin/python /opt/world-state/app/world_state_collector.py --config /etc/world-state/config.yaml --sources html
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+MemoryMax=700M
+TimeoutStartSec=240

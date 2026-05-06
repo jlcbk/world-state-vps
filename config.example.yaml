@@ -6,9 +6,10 @@ storage:
 
 collector:
   user_agent: "world-state-vps/0.1 contact=you@example.com"
-  request_timeout_seconds: 20
+  request_timeout_seconds: 45
   max_articles_per_query: 25
-  gdelt_timespan: "30min"
+  gdelt_timespan: "2h"
+  gdelt_request_delay_seconds: 15
 
 detector:
   recent_window_minutes: 60
@@ -28,15 +29,15 @@ detector:
 
 topics:
   - name: fed_policy
-    gdelt_query: '"Federal Reserve" OR FOMC OR "interest rates" OR inflation'
+    gdelt_query: '("Federal Reserve" OR FOMC OR "interest rates" OR inflation)'
   - name: us_macro
-    gdelt_query: '"nonfarm payrolls" OR CPI OR PCE OR unemployment OR "Treasury yields"'
+    gdelt_query: '("nonfarm payrolls" OR CPI OR PCE OR unemployment OR "Treasury yields")'
   - name: polymarket
-    gdelt_query: 'polymarket OR "prediction market" OR "election odds"'
+    gdelt_query: '(polymarket OR "prediction market" OR "election odds")'
   - name: geopolitics
-    gdelt_query: 'Ukraine Russia OR Taiwan China OR "Middle East" oil'
+    gdelt_query: '((Ukraine Russia) OR (Taiwan China) OR ("Middle East" oil))'
   - name: ai_stocks
-    gdelt_query: 'Nvidia OR OpenAI OR "AI chips" OR "semiconductor export controls"'
+    gdelt_query: '(Nvidia OR OpenAI OR "AI chips" OR "semiconductor export controls")'
 
 rss_feeds:
   - name: sec_press
@@ -45,6 +46,11 @@ rss_feeds:
   - name: fed_press
     topic: fed_policy
     url: https://www.federalreserve.gov/feeds/press_all.xml
+
+html_feeds:
   - name: treasury_press
     topic: us_policy
-    url: https://home.treasury.gov/news/press-releases/rss
+    url: https://home.treasury.gov/news/press-releases
+    parser: treasury_press_releases
+    max_items: 10
+    detail_delay_seconds: 1

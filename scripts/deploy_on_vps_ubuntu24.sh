@@ -34,11 +34,11 @@ fi
 echo "==> Running bootstrap"
 $SUDO bash "$APP_DIR/scripts/bootstrap_ubuntu24.sh"
 
-echo "==> Starting collector once"
-$SUDO systemctl start world-state-collector.service
+echo "==> Starting RSS collector once"
+$SUDO systemctl start world-state-rss.service
 
-echo "==> Enabling 15-minute timer"
-$SUDO systemctl enable --now world-state-collector.timer
+echo "==> Enabling split source timers"
+$SUDO systemctl enable --now world-state-rss.timer world-state-treasury.timer world-state-gdelt.timer
 
 echo
 echo "Deployment complete."
@@ -47,7 +47,9 @@ echo "Config file:"
 echo "  $CONFIG_FILE"
 echo
 echo "Useful checks:"
-echo "  journalctl -u world-state-collector.service -n 100 --no-pager"
+echo "  journalctl -u world-state-rss.service -n 100 --no-pager"
+echo "  journalctl -u world-state-treasury.service -n 100 --no-pager"
+echo "  journalctl -u world-state-gdelt.service -n 100 --no-pager"
 echo "  systemctl list-timers | grep world-state"
 echo "  jq . /var/lib/world-state/world_state.json"
 echo "  tail -n 20 /var/lib/world-state/events.jsonl"
