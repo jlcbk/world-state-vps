@@ -512,7 +512,21 @@ def store_articles(db_path: str, articles: Iterable[Dict[str, Any]]) -> int:
                 )
                 inserted += 1
             except sqlite3.IntegrityError:
-                pass
+                new_raw = a.get("raw", {}) or {}
+                if new_raw.get("full_text"):
+                    existing = db.execute("SELECT raw_json FROM articles WHERE id=?", (article_id,)).fetchone()
+                    existing_raw: Dict[str, Any] = {}
+                    if existing and existing[0]:
+                        try:
+                            existing_raw = json.loads(existing[0])
+                        except Exception:
+                            existing_raw = {}
+                    if not existing_raw.get("full_text"):
+                        merged_raw = {**existing_raw, **new_raw}
+                        db.execute(
+                            "UPDATE articles SET snippet=?, raw_json=? WHERE id=?",
+                            (a.get("snippet"), json.dumps(merged_raw, ensure_ascii=False), article_id),
+                        )
         db.commit()
     return inserted
 

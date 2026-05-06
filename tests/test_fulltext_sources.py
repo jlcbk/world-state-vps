@@ -29,3 +29,26 @@ def test_parse_whitehouse_briefings_list():
     rows = c.parse_whitehouse_briefings(html, "https://www.whitehouse.gov/briefings-statements/", max_items=10)
     assert rows[0]["title"] == "Example Statement"
     assert rows[0]["url"].endswith("/example/")
+
+
+def test_store_articles_enriches_duplicate_with_full_text(tmp_path):
+    db_path = tmp_path / "world_state.db"
+    c.init_db(str(db_path))
+    article = {
+        "source": "rss:sec_press",
+        "topic": "us_equities",
+        "title": "Title",
+        "url": "https://example.com/a",
+        "raw": {"feed": "sec_press"},
+    }
+    assert c.store_articles(str(db_path), [article]) == 1
+    enriched = dict(article)
+    enriched["snippet"] = "Full body"
+    enriched["raw"] = {"feed": "sec_press", "full_text": "Full body", "body_html": "<p>Full body</p>"}
+    assert c.store_articles(str(db_path), [enriched]) == 0
+    import json, sqlite3
+    db = sqlite3.connect(db_path)
+    raw_json, snippet = db.execute("SELECT raw_json, snippet FROM articles").fetchone()
+    raw = json.loads(raw_json)
+    assert raw["full_text"] == "Full body"
+    assert snippet == "Full body"
